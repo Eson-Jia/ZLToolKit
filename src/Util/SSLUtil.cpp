@@ -174,9 +174,139 @@ shared_ptr<EVP_PKEY> SSLUtil::loadPrivateKey(const string &file_path_or_data, co
 #endif //defined(ENABLE_OPENSSL)
 }
 
+shared_ptr<SSL_CTX> SSLUtil::makeTongsuoAutoContext(
+    const vector<shared_ptr<X509>> &certs,
+    const shared_ptr<EVP_PKEY> &key,
+    const vector<shared_ptr<X509>> &sign_certs,
+    const shared_ptr<EVP_PKEY> &sign_key,
+    const vector<shared_ptr<X509>> &enc_certs,
+    const shared_ptr<EVP_PKEY> &enc_key,
+    const std::string &chain_certs,
+    bool serverMode, bool checkKey) {
+    auto ctx = SSL_CTX_new(serverMode?TLS_server_method():TLS_client_method());
+    if (!ctx){
+        WarnL <<"SSL_CTX_new " << (serverMode ? "TLS_server_method" : "TLS_client_method") << " failed: " << getLastError();
+    }
+    SSL_CTX_enable_ntls(ctx);
+    SSL_CTX_set_options(ctx, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+    SSL_CTX_set1_groups_list(ctx, "X25510:P-256:P-384");
+    SSL_CTX_set_cipher_list(ctx,
+        R"(ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:
+             ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:
+             DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:
+             ECDHE-SM2-SM4-CBC-SM3:ECDHE-SM2-SM4-GCM-SM3:ECC-SM2-SM4-CBC-SM3:ECC-SM2-SM4-GCM-SM3:
+             RSA-SM4-CBC-SM3:RSA-SM4-GCM-SM3:RSA-SM4-CBC-SHA256:RSA-SM4-GCM-SHA256)");
+    SSL_CTX_set_ciphersuites(ctx, "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_SM4_GCM_SM3");
+    if (!ctx) {
+        WarnL << "SSL_CTX_new " << (serverMode ? "SSLv23_server_method" : "SSLv23_client_method") << " failed: " << getLastError();
+        return nullptr;
+    }
+    int i = 0;
+    for (auto &cer : certs) {
+        //加载公钥  [AUTO-TRANSLATED:d3cadbdf]
+        //Load public key
+        if (i++ == 0) {
+            //SSL_CTX_use_certificate内部会调用X509_up_ref,所以这里不用X509_dup  [AUTO-TRANSLATED:610aca57]
+            //SSL_CTX_use_certificate internally calls X509_up_ref, so no need to use X509_dup here
+            SSL_CTX_use_certificate(ctx, cer.get());
+        } else {
+            //需要先拷贝X509对象，否则指针会失效  [AUTO-TRANSLATED:c6cb5ebf]
+            //Need to copy X509 object first, otherwise the pointer will be invalid
+            SSL_CTX_add_extra_chain_cert(ctx, X509_dup(cer.get()));
+        }
+    }
+
+    if (key) {
+        //提供了私钥  [AUTO-TRANSLATED:1b23bc8c]
+        //Provided private key
+        if (SSL_CTX_use_PrivateKey(ctx, key.get()) != 1) {
+            WarnL << "SSL_CTX_use_PrivateKey failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    if (key || checkKey) {
+        //加载私钥成功  [AUTO-TRANSLATED:80e96abb]
+        //Private key loaded successfully
+        if (SSL_CTX_check_private_key(ctx) != 1) {
+            WarnL << "SSL_CTX_check_private_key failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+    i = 0;
+    for (const auto& cert : sign_certs) {
+        if(0 == i++) {
+            SSL_CTX_use_sign_certificate(ctx,cert.get());
+        }else {
+            SSL_CTX_add_extra_chain_cert(ctx,X509_dup(cert.get()));
+
+        }
+    }
+
+    if (sign_key) {
+        if (SSL_CTX_use_sign_PrivateKey(ctx,sign_key.get()) !=1) {
+            WarnL<<"SSL_CTX_use_sign_PrivateKey failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    if (sign_key || checkKey) {
+        //加载私钥成功  [AUTO-TRANSLATED:80e96abb]
+        //Private key loaded successfully
+        if (SSL_CTX_check_private_key(ctx) != 1) {
+            WarnL << "SSL_CTX_check_private_key failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    i = 0;
+    for (const auto &cert : enc_certs) {
+        if (0 == i++) {
+            SSL_CTX_use_enc_certificate(ctx,cert.get());
+        } else {
+            SSL_CTX_add_extra_chain_cert(ctx, X509_dup(cert.get()));
+        }
+    }
+
+    if (enc_key) {
+        if (SSL_CTX_use_enc_PrivateKey(ctx,enc_key.get()) != 1) {
+            WarnL << "SSL_CTX_use_enc_PricateKey failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    if (enc_key || checkKey) {
+        //加载私钥成功  [AUTO-TRANSLATED:80e96abb]
+        //Private key loaded successfully
+        if (SSL_CTX_check_private_key(ctx) != 1) {
+            WarnL << "SSL_CTX_check_private_key failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    if (!chain_certs.empty()) {
+        if (SSL_CTX_load_verify_file(ctx, chain_certs.data()) != 1) {
+            WarnL << "SSL_CTX_load_verify_file failed: " << getLastError();
+            SSL_CTX_free(ctx);
+            return nullptr;
+        }
+    }
+
+    return {ctx, [](SSL_CTX *ptr) {
+        SSL_CTX_free(ptr);
+    }};
+}
+
 shared_ptr<SSL_CTX> SSLUtil::makeSSLContext(const vector<shared_ptr<X509> > &cers, const shared_ptr<EVP_PKEY> &key, bool serverMode, bool checkKey) {
 #if defined(ENABLE_OPENSSL)
     SSL_CTX *ctx = SSL_CTX_new(serverMode ? SSLv23_server_method() : SSLv23_client_method());
+    SSL_CTX_enable_ntls(ctx);
     if (!ctx) {
         WarnL << "SSL_CTX_new " << (serverMode ? "SSLv23_server_method" : "SSLv23_client_method") << " failed: " << getLastError();
         return nullptr;

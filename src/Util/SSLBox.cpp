@@ -70,8 +70,8 @@ SSL_Initor::SSL_Initor() {
 #endif
     });
 
-    setContext("", SSLUtil::makeSSLContext(vector<shared_ptr<X509> >(), nullptr, false), false);
-    setContext("", SSLUtil::makeSSLContext(vector<shared_ptr<X509> >(), nullptr, true), true);
+    setContext("", SSLUtil::makeSSLContext(vector<shared_ptr<X509>>(), nullptr, false), false,false);
+    setContext("", SSLUtil::makeSSLContext(vector<shared_ptr<X509>>(), nullptr, true), true,false);
 #endif //defined(ENABLE_OPENSSL)
 }
 
@@ -102,9 +102,25 @@ bool SSL_Initor::loadCertificate(const string &pem_or_p12, bool server_mode, con
     }
     for (auto &cer : cers) {
         auto server_name = SSLUtil::getServerName(cer.get());
-        setContext(server_name, ssl_ctx, server_mode, is_default);
+        setContext(server_name, ssl_ctx, server_mode, false,is_default);
         break;
     }
+    return true;
+}
+bool SSL_Initor::loadCertificateWithGM(
+    const string &pem_or_p12, const string &enc_pem, const string &sign_pem, const string &chain_pem,bool strict_verify, bool server_mode,
+    const string &password, bool is_file, bool is_default){
+    auto certs  = SSLUtil::loadPublicKey(pem_or_p12,password,is_file);
+    auto key = SSLUtil::loadPrivateKey(pem_or_p12);
+    auto enc_certs = SSLUtil::loadPublicKey(enc_pem,password,is_file);
+    auto enc_key = SSLUtil::loadPrivateKey(enc_pem,password,is_file);
+    auto sign_certs = SSLUtil::loadPublicKey(sign_pem,password,is_file);
+    auto sign_key = SSLUtil::loadPrivateKey(sign_pem,password,is_file);
+    auto ssl_ctx = SSLUtil::makeTongsuoAutoContext(certs, key, sign_certs, sign_key, enc_certs, enc_key, chain_pem, server_mode, true);
+    if (!ssl_ctx) {
+        return false;
+    }
+    setContext("", ssl_ctx, server_mode, strict_verify,is_default);
     return true;
 }
 
@@ -152,12 +168,12 @@ int SSL_Initor::findCertificate(SSL *ssl, int *, void *arg) {
 #endif
 }
 
-bool SSL_Initor::setContext(const string &vhost, const shared_ptr<SSL_CTX> &ctx, bool server_mode, bool is_default) {
+bool SSL_Initor::setContext(const string &vhost, const shared_ptr<SSL_CTX> &ctx,const bool server_mode,const bool strict_verify,const bool is_default) {
     std::lock_guard<std::recursive_mutex> lck(_mtx);
     if (!ctx) {
         return false;
     }
-    setupCtx(ctx.get());
+    setupCtx(ctx.get(),strict_verify);
 #if defined(ENABLE_OPENSSL)
     if (vhost.empty()) {
         _ctx_empty[server_mode] = ctx;
@@ -187,24 +203,27 @@ bool SSL_Initor::setContext(const string &vhost, const shared_ptr<SSL_CTX> &ctx,
 #endif //defined(ENABLE_OPENSSL)
 }
 
-void SSL_Initor::setupCtx(SSL_CTX *ctx) {
+void SSL_Initor::setupCtx(SSL_CTX *ctx,const bool strict_verify) {
 #if defined(ENABLE_OPENSSL)
     //加载默认信任证书  [AUTO-TRANSLATED:4d98f092]
     //Load default trusted certificate
     SSLUtil::loadDefaultCAs(ctx);
     SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:!3DES:!DES:!IDEA:!RC4:!SEED-SHA:@STRENGTH");
     SSL_CTX_set_verify_depth(ctx, 9);
-    SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
+    SSL_CTX_set_mode(ctx, SSL_MODE_ASYNC);
     SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, [](int ok, X509_STORE_CTX *pStore) {
+    auto mode = SSL_VERIFY_PEER;
+    if (strict_verify) {
+        mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+    }
+    SSL_CTX_set_verify(ctx, mode, [](int ok, X509_STORE_CTX *pStore) {
         if (!ok) {
             int depth = X509_STORE_CTX_get_error_depth(pStore);
             int err = X509_STORE_CTX_get_error(pStore);
             WarnL << "SSL_CTX_set_verify callback, depth: " << depth << " ,err: " << X509_verify_cert_error_string(err);
         }
-        return s_ignore_invalid_cer ? 1 : ok;
+        return ok;
     });
-
 #ifndef SSL_OP_NO_COMPRESSION
 #define SSL_OP_NO_COMPRESSION 0
 #endif
@@ -219,15 +238,15 @@ void SSL_Initor::setupCtx(SSL_CTX *ctx) {
     ssloptions |= SSL_OP_NO_RENEGOTIATION;
 #endif
 
-#ifdef SSL_OP_NO_SSLv2 
+#ifdef SSL_OP_NO_SSLv2
     ssloptions |= SSL_OP_NO_SSLv2;
 #endif
 
-#ifdef SSL_OP_NO_SSLv3 
+#ifdef SSL_OP_NO_SSLv3
     ssloptions |= SSL_OP_NO_SSLv3;
 #endif
 
-#ifdef SSL_OP_NO_TLSv1 
+#ifdef SSL_OP_NO_TLSv1
     ssloptions |= SSL_OP_NO_TLSv1;
 #endif
 

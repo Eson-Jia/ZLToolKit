@@ -22,7 +22,7 @@
 
 typedef struct x509_st X509;
 typedef struct evp_pkey_st EVP_PKEY;
-typedef struct ssl_ctx_st SSL_CTX;
+typedef struct ssl_ctx_st SSL_CTX; // 命名：ssl_ctx_st 为了避免和ssl.h中的SSL_CTX冲突
 typedef struct ssl_st SSL;
 typedef struct bio_st BIO;
 
@@ -51,11 +51,13 @@ public:
      * @param password Private key encryption password
      * @param is_file Whether the parameter pem_or_p12 is a file path
      * @param is_default Whether it is the default certificate
-     
+
      * [AUTO-TRANSLATED:18cec755]
      */
-    bool loadCertificate(const std::string &pem_or_p12, bool server_mode = true, const std::string &password = "",
-                         bool is_file = true, bool is_default = true);
+    bool loadCertificate(const std::string &pem_or_p12, bool server_mode = true, const std::string &password = "", bool is_file = true, bool is_default = true);
+
+    bool loadCertificateWithGM(const std::string &pem_or_p12, const std::string &enc_pem, const std::string &sign_pem, const std::string &chain_pem, bool strict_verify = false, \
+        bool server_mode = true, const std::string &password = "", bool is_file = true,bool is_default = true);
 
     /**
      * 是否忽略无效的证书
@@ -125,7 +127,7 @@ private:
     /**
      * 创建SSL对象
      * Create an SSL object
-     
+
      * [AUTO-TRANSLATED:047a0b4c]
      */
     std::shared_ptr<SSL> makeSSL(bool server_mode);
@@ -135,6 +137,7 @@ private:
      * @param vhost 虚拟主机名
      * @param ctx ssl context
      * @param server_mode ssl context
+     * @param strict_verify
      * @param is_default 是否为默认证书
      * Set the ssl context
      * @param vhost Virtual host name
@@ -144,17 +147,18 @@ private:
      
      * [AUTO-TRANSLATED:265f3049]
      */
-    bool setContext(const std::string &vhost, const std::shared_ptr<SSL_CTX> &ctx, bool server_mode, bool is_default = true);
+    bool setContext(const std::string &vhost, const std::shared_ptr<SSL_CTX> &ctx, bool server_mode, bool strict_verify = false,bool is_default = true);
 
     /**
      * 设置SSL_CTX的默认配置
      * @param ctx 对象指针
      * Set the default configuration for SSL_CTX
+     * @param strict_verify
      * @param ctx Object pointer
      
      * [AUTO-TRANSLATED:1b3438d0]
      */
-    static void setupCtx(SSL_CTX *ctx);
+    static void setupCtx(SSL_CTX *ctx,bool strict_verify);
 
     std::shared_ptr<SSL_CTX> getSSLCtx_l(const std::string &vhost, bool server_mode);
 

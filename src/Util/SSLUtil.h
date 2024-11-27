@@ -70,7 +70,27 @@ public:
      * [AUTO-TRANSLATED:73c495c8]
      */
     static std::shared_ptr<EVP_PKEY> loadPrivateKey(const std::string &file_path_or_data, const std::string &passwd = "", bool isFile = true);
-
+    /**
+     *
+     * @param certs
+     * @param key
+     * @param sign_certs
+     * @param sign_key
+     * @param enc_certs
+     * @param enc_key
+     * @param serverMode
+     * @param checkKey
+     * @return
+     */
+    static std::shared_ptr<SSL_CTX> makeTongsuoAutoContext(
+    const std::vector<std::shared_ptr<X509>> &certs,
+    const std::shared_ptr<EVP_PKEY> &key,
+    const std::vector<std::shared_ptr<X509>> & sign_certs,
+    const std::shared_ptr<EVP_PKEY> & sign_key,
+    const std::vector<std::shared_ptr<X509>>& enc_certs,
+    const std::shared_ptr<EVP_PKEY>& enc_key,
+    const std::string&chain_certs,
+    bool serverMode, bool checkKey);
     /**
      * 创建SSL_CTX对象
      * @param cer 公钥数组
